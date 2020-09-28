@@ -24,6 +24,8 @@ unsigned long debounceDelay = 50;
 
 // Status
 bool roomOpen = false;
+unsigned long lastStatusUpdateTime = 0;
+unsigned long statusUpdateDelay = 1 * 60 * 1000;
 
 void setup() {
   pinMode(PIN_BUTTON, INPUT);
@@ -49,6 +51,7 @@ void setup() {
 }
 
 void loop() {
+    updateStatusFromApi();
     handleStatusLed();
     handleButton();
 }
@@ -66,7 +69,7 @@ void handleStatusLed() {
     lastBrightnessChange = millis();
   }
 
-  if ((WiFi.status() == WL_CONNECTED)) {
+  if (WiFi.status() == WL_CONNECTED && lastStatusUpdateTime > 0) {
     if (roomOpen) {
       statusLed.setPixelColor(0, 0, brightness, 0);
     } else {
@@ -88,7 +91,7 @@ void handleButton() {
     if (thisButtonState != buttonState) {
       buttonState = thisButtonState;
 
-      if (buttonState == HIGH && WiFi.status() == WL_CONNECTED) {
+      if (buttonState == HIGH && WiFi.status() == WL_CONNECTED && lastStatusUpdateTime > 0) {
         roomOpen = !roomOpen;
         sendStatusToApi();
       }
@@ -116,4 +119,33 @@ void sendStatusToApi() {
     }
 
     http.end();
+}
+
+void updateStatusFromApi() {
+  if (WiFi.status() == WL_CONNECTED && ((millis() - lastStatusUpdateTime) > statusUpdateDelay || lastStatusUpdateTime == 0)) {
+    WiFiClient client;
+    HTTPClient http;
+
+    Serial.print("[HTTP] begin...\n");
+    http.begin(client, "http://api.section77.de/");
+
+    Serial.print("[HTTP] GET...\n");
+    int httpCode = http.GET();
+
+    if (httpCode == HTTP_CODE_OK) {
+      Serial.printf("[HTTP] GET... code: %d\n", httpCode);
+
+      String payload = http.getString();
+      if (payload.indexOf("\"state\":{\"open\":") > 0) {
+        roomOpen = payload.indexOf("\"state\":{\"open\":true") > 0;
+        Serial.printf("[HTTP] GET... newState: %s\n", roomOpen ? "true" : "false");
+      }
+    } else {
+      Serial.printf("[HTTP] GET... failed, error: %s\n", http.errorToString(httpCode).c_str());
+    }
+
+    http.end();
+
+    lastStatusUpdateTime = millis();
+  }
 }
